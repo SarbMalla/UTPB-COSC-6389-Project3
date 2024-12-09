@@ -6,7 +6,6 @@ import os
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelBinarizer
 
-# Activation functions and derivatives
 def relu(x):
     return np.maximum(0, x)
 
@@ -19,7 +18,7 @@ def softmax(x):
     exp_x = np.exp(x - np.max(x, axis=1, keepdims=True))
     return exp_x / np.sum(exp_x, axis=1, keepdims=True)
 
-# Convolutional Neural Network (CNN) implementation
+#(CNN) implementation
 class ConvolutionalNeuralNetwork:
     def __init__(self, input_shape, num_classes):
         self.input_shape = input_shape
@@ -30,14 +29,13 @@ class ConvolutionalNeuralNetwork:
         self.init_weights()
 
     def init_weights(self):
-        # Convolution layer filters (3x3)
         self.filters = [
             np.random.randn(3, 3) * 0.1 for _ in range(4)
         ]
         self.biases = [
             np.zeros((1,)) for _ in range(4)
         ]
-        # Fully connected layer weights
+        
         flattened_size = ((self.input_shape[0] - 2) * (self.input_shape[1] - 2) * len(self.filters))
         self.weights.append(np.random.randn(flattened_size, self.num_classes) * 0.1)
 
@@ -65,7 +63,7 @@ class ConvolutionalNeuralNetwork:
     def backward(self, x, y, learning_rate):
         delta = self.output - y
 
-        # Backpropagation for fully connected layer
+        
         grad_w_fc = np.outer(self.fc_input, delta)
         self.weights[0] -= learning_rate * grad_w_fc
 
@@ -93,7 +91,7 @@ class ConvolutionalNeuralNetwork:
         layers = [self.input_shape[0] * self.input_shape[1]] + [len(self.filters)] + [self.num_classes]
         positions = []
 
-        # Draw input layer
+        #input layer
         input_layer = [(x_spacing, y_spacing * (i + 1)) for i in range(layers[0])]
         positions.append(input_layer)
         for pos in input_layer:
@@ -103,7 +101,7 @@ class ConvolutionalNeuralNetwork:
                 fill="blue"
             )
 
-        # Draw hidden layer
+        # hidden layer
         hidden_layer = [(x_spacing * 2, y_spacing * (i + 1)) for i in range(layers[1])]
         positions.append(hidden_layer)
         for pos in hidden_layer:
@@ -113,7 +111,7 @@ class ConvolutionalNeuralNetwork:
                 fill="green"
             )
 
-        # Draw output layer
+        # output layer
         output_layer = [(x_spacing * 3, y_spacing * (i + 1)) for i in range(layers[2])]
         positions.append(output_layer)
         for pos in output_layer:
@@ -123,13 +121,13 @@ class ConvolutionalNeuralNetwork:
                 fill="red"
             )
 
-        # Draw connections
+        # Drawing connections
         for layer_idx in range(len(positions) - 1):
             for start in positions[layer_idx]:
                 for end in positions[layer_idx + 1]:
                     canvas.create_line(start[0], start[1], end[0], end[1], fill="black")
 
-# Load dataset
+# Loading dataset
 def load_dataset(folder_path):
     images = []
     labels = []
@@ -139,7 +137,7 @@ def load_dataset(folder_path):
             for image_file in os.listdir(label_path):
                 image_path = os.path.join(label_path, image_file)
                 image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-                if image is None:  # Skip invalid images
+                if image is None:  
                     continue
                 image = cv2.resize(image, (28, 28))
                 images.append(image / 255.0)
@@ -155,7 +153,7 @@ def preprocess_data(X, y):
     y = lb.fit_transform(y)
     return X, y, lb.classes_
 
-# GUI Integration
+
 def start_training():
     try:
         epochs = int(epochs_entry.get())
