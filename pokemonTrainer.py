@@ -1,224 +1,166 @@
-import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext
 import os
 import numpy as np
 from PIL import Image, ImageTk
-import tensorflow as tf
-from tensorflow.keras import layers, models
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from sklearn.model_selection import train_test_split
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import tkinter as tk
+from tkinter import filedialog, messagebox
 
+# Constants
+IMAGE_SIZE = (64, 64)  # Resize all images to this size
 
-def load_and_preprocess_images(folder_path):
-    images = []
-    labels = []
-    all_images = []
+# Step 1: Image Preprocessing
+def preprocess_image(image_path):
+    """Load and preprocess an image by resizing and normalizing."""
+    image = Image.open(image_path).resize(IMAGE_SIZE).convert("RGB")
+    data = np.array(image) / 255.0  # Normalize to [0, 1]
+    return image, data
 
-    for label in ['grass', 'fire']:
-        label_folder = os.path.join(folder_path, label)
-        if not os.path.exists(label_folder):
-            continue
-        for img_name in os.listdir(label_folder):
-            img_path = os.path.join(label_folder, img_name)
-            img = Image.open(img_path)
-            img = img.resize((128, 128))
-            img = np.array(img)
-            if img.shape[2] == 4:
-                img = img[:, :, :3]
+# Step 2: Custom Neural Network Implementation
+class SimpleCNN:
+    def __init__(self, input_shape, num_classes, ui_callback=None):
+        self.input_shape = input_shape
+        self.num_classes = num_classes
+        self.weights = []  # Store weights for all layers
+        self.biases = []   # Store biases for all layers
+        self.ui_callback = ui_callback  # Callback to update UI
+        self.build_network()
 
-            mask_red = img[:, :, 0] > 100
-            mask_green = img[:, :, 1] > 100
-            mask_white = np.all(img > 200, axis=-1)
+    def build_network(self):
+        """Initialize the weights and biases of the network."""
+        conv_filter_size = (3, 3)
+        num_filters = 8
+        self.weights.append(np.random.randn(*conv_filter_size, self.input_shape[2], num_filters) * 0.01)
+        self.biases.append(np.zeros((num_filters,)))
 
-            img[mask_white] = [0, 0, 0]
+        fc_input_size = (IMAGE_SIZE[0] - 2) * (IMAGE_SIZE[1] - 2) * num_filters
+        self.weights.append(np.random.randn(fc_input_size, self.num_classes) * 0.01)
+        self.biases.append(np.zeros((self.num_classes,)))
 
-            red_pixels = np.sum(mask_red)
-            green_pixels = np.sum(mask_green)
+    def forward(self, x):
+        """Perform a forward pass through the network."""
+        conv_output = self.convolve(x, self.weights[0], self.biases[0])
+        flattened = conv_output.flatten()
+        output = np.dot(flattened, self.weights[1]) + self.biases[1]
 
+        if self.ui_callback:
+            self.ui_callback(self)  # Update UI with the current state of weights
 
-            if red_pixels > green_pixels:
-                labels.append(1)  # Fire
-            else:
-                labels.append(0)  # Grass
+        return output
 
-            images.append(img)
-            all_images.append(img)
+    def convolve(self, x, filters, biases):
+        """Simplified convolution operation."""
+        filter_height, filter_width, _, num_filters = filters.shape
+        input_height, input_width, _ = x.shape
+        output_height = input_height - filter_height + 1
+        output_width = input_width - filter_width + 1
 
-    images = np.array(images)
-    labels = np.array(labels)
-    return images, labels, all_images
+        output = np.zeros((output_height, output_width, num_filters))
 
+        for h in range(output_height):
+            for w in range(output_width):
+                for f in range(num_filters):
+                    region = x[h:h + filter_height, w:w + filter_width, :]
+                    output[h, w, f] = np.sum(region * filters[:, :, :, f]) + biases[f]
 
-#CNN model
-def build_cnn_model():
-    model = models.Sequential([
-        layers.InputLayer(shape=(128, 128, 3)),
-        layers.Conv2D(32, (3, 3), activation='relu'),
-        layers.MaxPooling2D((2, 2)),
-        layers.Conv2D(64, (3, 3), activation='relu'),
-        layers.MaxPooling2D((2, 2)),
-        layers.Conv2D(128, (3, 3), activation='relu'),
-        layers.MaxPooling2D((2, 2)),
-        layers.Flatten(),
-        layers.Dense(64, activation='relu'),
-        layers.Dense(1, activation='sigmoid')
-    ])
-    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-    return model
+        return output
 
+# Step 3: Visualization in the UI
+class NeuralNetworkVisualizer(tk.Canvas):
+    """A canvas to visualize the neural network and weights in real time."""
+    def __init__(self, parent, width, height):
+        super().__init__(parent, width=width, height=height, bg="white")
+        self.pack()
 
+    def update_visualization(self, network):
+        """Update the visualization with the current weights."""
+        self.delete("all")
+        x_start = 50
+        y_start = 50
+        layer_gap = 150
+        neuron_gap = 50
+        radius = 15
 
-class LivePlotCallback(tf.keras.callbacks.Callback):
-    def __init__(self, plot_frame, history_data, update_interval=100, image_label=None, all_images=None):
-        self.plot_frame = plot_frame
-        self.history_data = history_data
-        self.update_interval = update_interval
-        self.image_label = image_label
-        self.all_images = all_images
-        self.image_index = 0
+        # Draw layers
+        for layer_idx, (weights, biases) in enumerate(zip(network.weights, network.biases)):
+            x = x_start + layer_idx * layer_gap
+            for neuron_idx, _ in enumerate(biases):
+                y = y_start + neuron_idx * neuron_gap
+                self.create_oval(x - radius, y - radius, x + radius, y + radius, fill="blue")
 
-    def on_epoch_end(self, epoch, logs=None):
+                # Draw connections (weights)
+                if layer_idx > 0:  # Skip input layer
+                    prev_layer_neurons = len(network.biases[layer_idx - 1])
+                    for prev_idx in range(prev_layer_neurons):
+                        prev_x = x_start + (layer_idx - 1) * layer_gap
+                        prev_y = y_start + prev_idx * neuron_gap
+                        weight = weights[prev_idx, neuron_idx]
+                        color = "green" if weight > 0 else "red"
+                        self.create_line(prev_x + radius, prev_y, x - radius, y, fill=color)
 
-        self.history_data['loss'].append(logs['loss'])
-        self.history_data['val_loss'].append(logs['val_loss'])
-        self.history_data['accuracy'].append(logs['accuracy'])
-        self.history_data['val_accuracy'].append(logs['val_accuracy'])
+        # Force the canvas to redraw
+        self.update_idletasks()
+        self.update()
 
+# Step 4: Dataset Loading and Processing
+def load_dataset():
+    """Load dataset from folders."""
+    folder_path = filedialog.askdirectory(title="Select Dataset Folder")
+    if not folder_path:
+        messagebox.showwarning("No Folder Selected", "Please select a folder to load the dataset.")
+        return None
 
-        self.update_image_display()
+    fire_folder = os.path.join(folder_path, "fire")
+    grass_folder = os.path.join(folder_path, "grass")
 
+    if not os.path.exists(fire_folder) or not os.path.exists(grass_folder):
+        messagebox.showerror("Invalid Dataset", "Dataset folder must contain 'fire' and 'grass' subfolders.")
+        return None
 
-        self.update_plot()
+    fire_images = [os.path.join(fire_folder, img) for img in os.listdir(fire_folder) if img.endswith(('.png', '.jpg', '.jpeg'))]
+    grass_images = [os.path.join(grass_folder, img) for img in os.listdir(grass_folder) if img.endswith(('.png', '.jpg', '.jpeg'))]
 
-    def update_plot(self):
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 4))
+    return fire_images, grass_images
 
-        ax1.plot(self.history_data['loss'], label='Training Loss')
-        ax1.plot(self.history_data['val_loss'], label='Validation Loss')
-        ax1.set_title('Loss vs Epochs')
-        ax1.set_xlabel('Epochs')
-        ax1.set_ylabel('Loss')
-        ax1.legend()
+def run_classifier():
+    """Run the classifier on the dataset."""
+    dataset = load_dataset()
+    if dataset is None:
+        return
 
-        ax2.plot(self.history_data['accuracy'], label='Training Accuracy')
-        ax2.plot(self.history_data['val_accuracy'], label='Validation Accuracy')
-        ax2.set_title('Accuracy vs Epochs')
-        ax2.set_xlabel('Epochs')
-        ax2.set_ylabel('Accuracy')
-        ax2.legend()
+    fire_images, grass_images = dataset
+    visualizer = NeuralNetworkVisualizer(side_frame, width=400, height=600)
+    cnn = SimpleCNN(input_shape=(64, 64, 3), num_classes=2, ui_callback=visualizer.update_visualization)
 
-        for widget in self.plot_frame.winfo_children():
-            widget.destroy()
+    for img_path in fire_images + grass_images:
+        original_image, image_data = preprocess_image(img_path)
+        cnn.forward(image_data)
 
-        canvas = FigureCanvasTkAgg(fig, master=self.plot_frame)
-        canvas.draw()
-        canvas.get_tk_widget().pack()
+        # Display the current image being processed
+        img = ImageTk.PhotoImage(original_image)
+        current_image_label.configure(image=img)
+        current_image_label.image = img
 
-        self.plot_frame.after(self.update_interval, lambda: self.plot_frame.update_idletasks())
+        root.update()
 
-    def update_image_display(self):
-        if self.image_index < len(self.all_images):
-            image = self.all_images[self.image_index]
-            image = Image.fromarray(image)
-            image = image.resize((128, 128))
+    messagebox.showinfo("Processing Complete", "All images have been processed.")
 
-            img_tk = ImageTk.PhotoImage(image)
+# Main Application
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.title("Pokemon Type Classifier")
 
-            self.image_label.config(image=img_tk)
-            self.image_label.image = img_tk
+    # Left frame: Display image being processed
+    left_frame = tk.Frame(root)
+    left_frame.pack(side=tk.LEFT, padx=10, pady=10)
 
-            self.image_index += 1
+    current_image_label = tk.Label(left_frame)
+    current_image_label.pack(pady=10)
 
+    # Right frame: Neural network visualization
+    side_frame = tk.Frame(root)
+    side_frame.pack(side=tk.RIGHT, padx=10, pady=10)
 
-def start_training():
-    try:
-        epochs = int(epochs_entry.get())
-        learning_rate = float(learning_rate_entry.get())
+    # Parameters and button
+    load_button = tk.Button(root, text="Load Dataset and Classify", command=run_classifier)
+    load_button.pack(pady=20)
 
-        folder_path = filedialog.askdirectory(title="Select Pokémon Dataset Folder")
-        if not folder_path:
-            return
-
-        images, labels, all_images = load_and_preprocess_images(folder_path)
-        if images.shape[0] == 0:
-            messagebox.showerror("Error", "No valid images found in the folder.")
-            return
-
-        images = images / 255.0
-
-        X_train, X_test, y_train, y_test = train_test_split(images, labels, test_size=0.2, random_state=42)
-
-        model = build_cnn_model()
-
-        datagen = ImageDataGenerator(horizontal_flip=True, rotation_range=30)
-        datagen.fit(X_train)
-
-        history_data = {
-            'loss': [],
-            'val_loss': [],
-            'accuracy': [],
-            'val_accuracy': []
-        }
-
-        live_plot_callback = LivePlotCallback(plot_frame, history_data, image_label=image_label, all_images=all_images)
-
-        optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-
-        model.compile(optimizer=optimizer, loss='binary_crossentropy', metrics=['accuracy'])
-
-        live_plot_callback.update_image_display()
-
-        model.fit(datagen.flow(X_train, y_train, batch_size=32),
-                  epochs=epochs, validation_data=(X_test, y_test),
-                  callbacks=[live_plot_callback])
-
-        test_loss, test_accuracy = model.evaluate(X_test, y_test)
-        result_text.insert(tk.END, f"Training complete! Test Accuracy: {test_accuracy:.2f}\n")
-        result_text.see(tk.END)
-
-    except Exception as e:
-        messagebox.showerror("Error", f"An error occurred: {e}")
-
-
-
-root = tk.Tk()
-root.title("Pokémon Type Classifier with CNN")
-
-window_width = 800
-window_height = 600
-screen_width = root.winfo_screenwidth()
-screen_height = root.winfo_screenheight()
-
-position_top = int(screen_height / 2 - window_height / 2)
-position_left = int(screen_width / 2 - window_width / 2)
-
-root.geometry(f'{window_width}x{window_height}+{position_left}+{position_top}')
-
-main_frame = tk.Frame(root)
-main_frame.grid(row=0, column=0, padx=10, pady=10)
-
-tk.Label(main_frame, text="Start Training Pokémon Dataset").grid(row=0, column=0, padx=5, pady=5)
-
-tk.Label(main_frame, text="Epochs:").grid(row=1, column=0, padx=5, pady=5)
-epochs_entry = tk.Entry(main_frame)
-epochs_entry.grid(row=1, column=1, padx=5, pady=5)
-epochs_entry.insert(tk.END, "10")
-tk.Label(main_frame, text="Learning Rate:").grid(row=2, column=0, padx=5, pady=5)
-learning_rate_entry = tk.Entry(main_frame)
-learning_rate_entry.grid(row=2, column=1, padx=5, pady=5)
-learning_rate_entry.insert(tk.END, "0.001")
-
-tk.Button(main_frame, text="Start Training", command=start_training).grid(row=3, column=0, pady=10, columnspan=2)
-
-plot_frame = tk.Frame(main_frame)
-plot_frame.grid(row=0, column=2, rowspan=3, padx=10, pady=10)
-
-image_label = tk.Label(main_frame)
-image_label.grid(row=4, column=0, padx=10, pady=10, columnspan=2)
-
-result_text = scrolledtext.ScrolledText(main_frame, width=40, height=6)
-result_text.grid(row=5, column=0, columnspan=3, padx=10, pady=10)
-
-root.mainloop()
+    root.mainloop()
